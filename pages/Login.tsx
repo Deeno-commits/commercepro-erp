@@ -1,6 +1,5 @@
 
-import React, { useState } from 'react';
-// Fix: Use a resilient import style for react-router-dom components and hooks
+import React, { useState, useEffect } from 'react';
 import * as RouterDom from 'react-router-dom';
 const { useNavigate, Link } = RouterDom as any;
 
@@ -12,8 +11,13 @@ const Login: React.FC = () => {
   const [password, setPassword] = useState('kathoun07');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const { login } = useAuth();
+  const { login, user } = useAuth();
   const navigate = useNavigate();
+
+  // Si l'utilisateur est déjà connecté, on le redirige immédiatement sans passer par le formulaire
+  useEffect(() => {
+    if (user) navigate('/');
+  }, [user, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,18 +28,13 @@ const Login: React.FC = () => {
     
     try {
       await login(email, password);
-      setTimeout(() => {
-        navigate('/');
-      }, 300);
+      // On ne navigue pas manuellement ici, le useEffect s'en charge dès que 'user' change
     } catch (err: any) {
       console.error("Login Error:", err);
       let msg = "Accès refusé. Vérifiez vos identifiants.";
       
-      // Gestion spécifique de l'erreur 400 pour guider l'utilisateur
       if (err.status === 400 || err.message.includes("Invalid login credentials")) {
         msg = "Ce compte n'existe pas encore. Vous devez d'abord vous INSCRIRE.";
-      } else if (err.message.includes("Email not confirmed")) {
-        msg = "E-mail non confirmé. Veuillez désactiver 'Confirm Email' dans Supabase.";
       }
       
       setError(msg);

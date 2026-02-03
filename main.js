@@ -6,11 +6,16 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Désactivation des fonctionnalités inutiles pour la sécurité et activation du GPS
-app.commandLine.appendSwitch('disable-features', 'NetworkLocationProvider');
+// Désactivation des fonctionnalités Chrome qui causent des erreurs de protocole et ralentissent le rendu
+app.commandLine.appendSwitch('disable-features', 'Autofill,AutofillEnableShadowDom,NetworkLocationProvider,PasswordGeneration');
+app.commandLine.appendSwitch('disable-component-update');
 app.commandLine.appendSwitch('enable-blink-features', 'Geolocation');
 
 function createWindow() {
+  const iconPath = app.isPackaged 
+    ? path.join(__dirname, 'dist', 'favicon.ico') 
+    : path.join(__dirname, 'public', 'favicon.ico');
+
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -18,25 +23,24 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       devTools: !app.isPackaged,
-      partition: 'persist:commercepro'
+      partition: 'persist:commercepro_session', // Persistance absolue de la session
+      spellcheck: false,
+      enableWebSQL: false
     },
     title: "CommercePro ERP",
     autoHideMenuBar: true,
     show: false,
-    icon: path.join(__dirname, 'dist', 'favicon.ico') // Optionnel si vous ajoutez une icône
+    icon: iconPath
   });
 
   process.env['ELECTRON_DISABLE_SECURITY_WARNINGS'] = 'true';
 
   if (app.isPackaged) {
-    // MODE PRODUCTION : On charge le fichier compilé par Vite
     win.loadFile(path.join(__dirname, 'dist/index.html'));
   } else {
-    // MODE DÉVELOPPEMENT : On charge le serveur de dev Vite
     const loadURL = () => {
       win.loadURL('http://localhost:5173').catch(() => {
-        console.log('Attente du serveur Vite...');
-        setTimeout(loadURL, 1500);
+        setTimeout(loadURL, 1000);
       });
     };
     loadURL();
@@ -44,11 +48,12 @@ function createWindow() {
 
   win.once('ready-to-show', () => {
     win.show();
+    // Force le focus pour éviter les lags d'initialisation
+    win.focus();
   });
 }
 
 app.whenReady().then(() => {
-  // Gestion des permissions GPS
   session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
     if (permission === 'geolocation') return true;
     return false;

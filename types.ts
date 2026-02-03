@@ -56,7 +56,6 @@ export interface SaleItem {
 
 export interface Delivery {
   id: string;
-  // Added user_id to link the delivery record to a specific user
   user_id?: string;
   driver_name: string;
   current_lat: number;
@@ -65,6 +64,7 @@ export interface Delivery {
   work_status: 'active' | 'rest';
   order_id?: string;
   battery_level?: number;
+  updated_at?: string;
 }
 
 export interface BusinessInfo {

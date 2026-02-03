@@ -3,17 +3,19 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Truck, 
   CheckCircle, 
-  XCircle, 
   Navigation, 
-  Power,
   Package,
   MapPin,
-  AlertCircle,
-  User,
   Map as MapIcon,
   List as ListIcon,
   LogOut,
-  RefreshCw
+  RefreshCw,
+  Clock,
+  Battery,
+  AlertCircle,
+  XCircle,
+  Coffee,
+  Zap
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../App';
@@ -32,7 +34,6 @@ const DeliveryManagement: React.FC = () => {
   const markersRef = useRef<{ [key: string]: L.Marker }>({});
   
   const [myLocation, setMyLocation] = useState({ lat: -18.8792, lng: 47.5079 });
-  const [gpsError, setGpsError] = useState<string | null>(null);
 
   const isLivreur = user?.role === UserRole.LIVREUR;
   const myProfile = drivers.find(d => d.user_id === user?.id);
@@ -50,113 +51,209 @@ const DeliveryManagement: React.FC = () => {
       const { error } = await supabase.from('sales').update({ delivery_status: status }).eq('id', orderId);
       if (error) throw error;
       fetchData();
-    } catch (err) { alert("Erreur mise à jour statut"); }
+    } catch (err) { alert("Erreur mise à jour status"); }
+  };
+
+  const toggleWorkStatus = async () => {
+    if (!myProfile) return;
+    const newStatus = myProfile.work_status === 'active' ? 'rest' : 'active';
+    try {
+      const { error } = await supabase.from('deliveries').update({ work_status: newStatus }).eq('id', myProfile.id);
+      if (error) throw error;
+      fetchData();
+    } catch (err) { alert("Erreur status travail"); }
   };
 
   useEffect(() => {
+    if (isLivreur) {
+      setViewMode('list');
+      return;
+    }
     if (!mapContainerRef.current || mapInstanceRef.current || viewMode !== 'map') return;
-    mapInstanceRef.current = L.map(mapContainerRef.current, { zoomControl: false, attributionControl: false }).setView([myLocation.lat, myLocation.lng], 15);
+    mapInstanceRef.current = L.map(mapContainerRef.current, { zoomControl: false, attributionControl: false }).setView([myLocation.lat, myLocation.lng], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapInstanceRef.current);
     return () => { if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null; } };
-  }, [viewMode]);
+  }, [viewMode, isLivreur]);
 
   useEffect(() => {
-    if (!mapInstanceRef.current) return;
+    if (!mapInstanceRef.current || isLivreur || viewMode !== 'map') return;
     Object.values(markersRef.current).forEach(m => m.remove());
     markersRef.current = {};
-    const myIcon = L.divIcon({
-      html: `<div class="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-2xl border-4 border-white animate-pulse"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="M20 12h2"></path><path d="M4 12h2"></path></svg></div>`,
-      className: '', iconSize: [40, 40], iconAnchor: [20, 20]
-    });
-    markersRef.current['me'] = L.marker([myLocation.lat, myLocation.lng], { icon: myIcon }).addTo(mapInstanceRef.current).bindPopup("Ma Position");
+    
     drivers.forEach(d => {
-      if (d.user_id === user?.id || !d.current_lat) return;
-      const otherIcon = L.divIcon({
-        html: `<div class="w-8 h-8 bg-gray-900 text-white rounded-full flex items-center justify-center shadow-lg border-2 border-white"><User size={14}/></div>`,
-        className: '', iconSize: [32, 32], iconAnchor: [16, 16]
+      if (!d.current_lat || !d.current_lng) return;
+      const isOnline = (new Date().getTime() - new Date(d.updated_at || 0).getTime()) < 60000;
+      
+      const icon = L.divIcon({
+        html: `
+          <div class="relative">
+            <div class="w-10 h-10 ${isOnline ? 'bg-blue-600' : 'bg-gray-500'} text-white rounded-full flex items-center justify-center shadow-2xl border-4 border-white">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M12 2v2"></path><path d="M12 20v2"></path><path d="M20 12h2"></path><path d="M4 12h2"></path>
+              </svg>
+            </div>
+            ${isOnline ? '<div class="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white animate-pulse"></div>' : ''}
+          </div>
+        `,
+        className: '', iconSize: [40, 40], iconAnchor: [20, 20]
       });
-      L.marker([d.current_lat, d.current_lng], { icon: otherIcon }).addTo(mapInstanceRef.current!).bindPopup(d.driver_name);
+      
+      markersRef.current[d.id] = L.marker([d.current_lat, d.current_lng], { icon })
+        .addTo(mapInstanceRef.current!)
+        .bindPopup(`<b>${d.driver_name}</b><br/>${isOnline ? 'EN LIGNE' : 'HORS LIGNE'}`);
     });
-  }, [drivers, myLocation, viewMode]);
+  }, [drivers, isLivreur, viewMode]);
 
   useEffect(() => {
     fetchData();
     let watchId: number;
-    const startGps = () => {
-      if (!("geolocation" in navigator)) return;
-      watchId = navigator.geolocation.watchPosition(
-        (position) => {
-          const { latitude, longitude } = position.coords;
-          setMyLocation({ lat: latitude, lng: longitude });
-          setGpsError(null);
-          if (isLivreur && myProfile?.work_status === 'active') {
-            supabase.from('deliveries').update({ current_lat: latitude, current_lng: longitude, updated_at: new Date().toISOString() }).eq('id', myProfile.id).then();
-          }
-        },
-        (err) => { setGpsError("GPS Simulé (Fixe)"); setMyLocation({ lat: -18.8792, lng: 47.5079 }); },
-        { enableHighAccuracy: false, timeout: 5000, maximumAge: 30000 }
-      );
-    };
-    startGps();
+    if (navigator.geolocation) {
+      watchId = navigator.geolocation.watchPosition((pos) => {
+        const { latitude, longitude } = pos.coords;
+        setMyLocation({ lat: latitude, lng: longitude });
+        
+        if (isLivreur && myProfile && myProfile.work_status === 'active') {
+          supabase.from('deliveries')
+            .update({ 
+              current_lat: latitude, 
+              current_lng: longitude, 
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', myProfile.id)
+            .then();
+        }
+      }, (err) => console.warn("GPS Access Denied"), { enableHighAccuracy: true });
+    }
     return () => { if (watchId) navigator.geolocation.clearWatch(watchId); };
-  }, [user?.id, myProfile?.id]);
+  }, [isLivreur, myProfile?.id]);
 
-  const filteredOrders = orders.filter(o => !isLivreur || o.assigned_driver_id === myProfile?.id || o.delivery_status === 'pending');
+  const filteredOrders = orders.filter(o => !isLivreur || o.assigned_driver_id === myProfile?.id);
+
+  if (loading) return (
+    <div className="h-full flex items-center justify-center p-20">
+      <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+    </div>
+  );
 
   return (
-    <div className={`h-full flex flex-col gap-6 animate-in slide-in-from-right-4 duration-500 overflow-hidden no-print pb-10 ${isLivreur ? 'bg-white p-4' : 'px-4'}`}>
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+    <div className={`h-full flex flex-col gap-6 animate-in slide-in-from-right-4 duration-500 overflow-hidden no-print ${isLivreur ? 'bg-white p-6' : 'px-4'}`}>
+      
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-black tracking-tight uppercase">Logistique <span className="text-blue-600">GPS</span></h1>
+          <h1 className={`${isLivreur ? 'text-2xl' : 'text-3xl'} font-black tracking-tight uppercase`}>
+            {isLivreur ? 'Tableau de Bord Livreur' : 'Supervision GPS'}
+          </h1>
           <div className="flex items-center gap-2 mt-1">
-            <div className={`w-2 h-2 rounded-full ${myProfile?.work_status === 'active' ? 'bg-green-500' : 'bg-red-500'}`}></div>
-            <p className="text-gray-500 font-bold text-[10px] uppercase">{myProfile?.work_status === 'active' ? 'Connecté' : 'Déconnecté'}</p>
+            <div className={`w-2 h-2 rounded-full ${myProfile?.work_status === 'active' ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}></div>
+            <p className="text-gray-400 font-black text-[10px] uppercase tracking-widest">
+              {myProfile?.work_status === 'active' ? 'Opérationnel' : 'En Pause'}
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Boutons spéciaux pour livreur (puisqu'il n'a plus de menu) */}
-          {isLivreur && (
+        <div className="flex items-center gap-3">
+          {isLivreur ? (
             <>
-              <button onClick={() => window.location.reload()} className="p-3 bg-gray-100 text-gray-600 rounded-2xl"><RefreshCw size={18}/></button>
-              <button onClick={logout} className="p-3 bg-red-50 text-red-600 rounded-2xl"><LogOut size={18}/></button>
+              {/* BOUTON ACTIF / REST */}
+              <button 
+                onClick={toggleWorkStatus}
+                className={`flex items-center gap-3 px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all shadow-xl ${myProfile?.work_status === 'active' ? 'bg-orange-100 text-orange-600' : 'bg-green-600 text-white'}`}
+              >
+                {myProfile?.work_status === 'active' ? <><Coffee size={18}/> Passer en Repos</> : <><Zap size={18}/> Passer Actif</>}
+              </button>
+              <button onClick={logout} className="p-4 bg-red-50 text-red-600 rounded-2xl border border-red-100"><LogOut size={20}/></button>
             </>
+          ) : (
+            <div className="flex bg-white p-1 rounded-2xl border border-gray-100 shadow-sm">
+              <button onClick={() => setViewMode('list')} className={`p-2 rounded-xl ${viewMode === 'list' ? 'bg-blue-600 text-white' : 'text-gray-400'}`}><ListIcon size={18}/></button>
+              <button onClick={() => setViewMode('map')} className={`p-2 rounded-xl ${viewMode === 'map' ? 'bg-blue-600 text-white' : 'text-gray-400'}`}><MapIcon size={18}/></button>
+            </div>
           )}
-          <div className="flex bg-white p-1 rounded-2xl border border-gray-100 shadow-sm">
-            <button onClick={() => setViewMode('list')} className={`p-2.5 rounded-xl ${viewMode === 'list' ? 'bg-blue-600 text-white' : 'text-gray-400'}`}><ListIcon size={18}/></button>
-            <button onClick={() => setViewMode('map')} className={`p-2.5 rounded-xl ${viewMode === 'map' ? 'bg-blue-600 text-white' : 'text-gray-400'}`}><MapIcon size={18}/></button>
-          </div>
         </div>
       </div>
 
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0 relative">
-        <div className={`lg:col-span-4 flex flex-col gap-4 overflow-y-auto ${viewMode === 'map' ? 'hidden lg:flex' : 'flex'}`}>
-          {filteredOrders.map(order => (
-            <div key={order.id} className="bg-gray-50 p-6 rounded-[32px] border border-gray-100 shadow-sm space-y-4">
-              <div className="flex justify-between items-start">
-                <div>
-                  <span className="text-[8px] font-black uppercase px-2 py-1 rounded-lg bg-blue-100 text-blue-600 mb-2 inline-block">{order.delivery_status}</span>
-                  <h4 className="font-black text-sm uppercase text-gray-900 truncate">{order.customer_name}</h4>
-                  <p className="text-[10px] font-bold text-gray-400"># {order.sale_number}</p>
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0">
+        <div className={`${isLivreur || viewMode === 'list' ? 'lg:col-span-12' : 'lg:col-span-4'} flex flex-col gap-4 overflow-y-auto pr-1 pb-10`}>
+          {filteredOrders.length > 0 ? filteredOrders.map(order => (
+            <div key={order.id} className={`p-6 lg:p-8 rounded-[32px] border transition-all ${order.delivery_status === 'delivered' ? 'bg-gray-50 border-gray-100 opacity-60' : 'bg-white border-blue-100 shadow-xl shadow-blue-50'}`}>
+              <div className="flex justify-between items-start mb-6">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${order.delivery_status === 'delivered' ? 'bg-green-500' : order.delivery_status === 'returned' ? 'bg-red-500' : 'bg-blue-600 animate-pulse'}`}></span>
+                    <p className="text-[10px] font-black uppercase text-gray-400 tracking-widest">FAC #{order.sale_number}</p>
+                  </div>
+                  <h4 className="font-black text-lg text-gray-900 uppercase leading-none">{order.customer_name}</h4>
+                  <div className="flex items-center gap-3 pt-2">
+                    <p className="text-[10px] font-bold text-blue-600 flex items-center gap-1"><MapPin size={10}/> {order.customer_address || 'Tana Centre'}</p>
+                    <p className="text-[10px] font-bold text-gray-400 flex items-center gap-1"><Clock size={10}/> {new Date(order.created_at).toLocaleTimeString()}</p>
+                  </div>
                 </div>
-                <p className="text-sm font-black text-blue-600">{Number(order.total_amount).toLocaleString()} Ar</p>
+                <div className="text-right">
+                  <p className="text-lg font-black text-gray-900">{Number(order.total_amount).toLocaleString()} Ar</p>
+                  <p className="text-[9px] font-black text-green-600 uppercase">Payé Cash</p>
+                </div>
               </div>
-              <div className="grid grid-cols-3 gap-2">
-                <button onClick={() => updateOrderStatus(order.id, 'en_route')} className="py-4 bg-white text-[8px] font-black uppercase rounded-2xl border border-gray-100 hover:bg-blue-600 hover:text-white transition-all shadow-sm">Route</button>
-                <button onClick={() => updateOrderStatus(order.id, 'delivered')} className="py-4 bg-white text-[8px] font-black uppercase rounded-2xl border border-gray-100 hover:bg-green-600 hover:text-white transition-all shadow-sm">Livré</button>
-                <button onClick={() => updateOrderStatus(order.id, 'returned')} className="py-4 bg-white text-[8px] font-black uppercase rounded-2xl border border-gray-100 hover:bg-red-600 hover:text-white transition-all shadow-sm">Retour</button>
+              
+              {/* BOUTONS EN ROUTE / LIVRÉ / RETOUR */}
+              <div className="grid grid-cols-3 gap-3">
+                <button 
+                  onClick={() => updateOrderStatus(order.id, 'en_route')} 
+                  disabled={order.delivery_status !== 'pending' && order.delivery_status !== 'assigned'}
+                  className={`py-4 rounded-2xl font-black uppercase text-[9px] tracking-widest transition-all flex flex-col items-center justify-center gap-2 ${order.delivery_status === 'en_route' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-50 text-gray-400 hover:border-blue-400 border border-transparent'}`}
+                >
+                  <Navigation size={18}/> En Route
+                </button>
+                <button 
+                  onClick={() => updateOrderStatus(order.id, 'delivered')} 
+                  disabled={order.delivery_status === 'delivered' || order.delivery_status === 'returned'}
+                  className={`py-4 rounded-2xl font-black uppercase text-[9px] tracking-widest transition-all flex flex-col items-center justify-center gap-2 ${order.delivery_status === 'delivered' ? 'bg-green-600 text-white shadow-lg' : 'bg-gray-50 text-gray-400 hover:border-green-400 border border-transparent'}`}
+                >
+                  <CheckCircle size={18}/> Livré
+                </button>
+                <button 
+                  onClick={() => updateOrderStatus(order.id, 'returned')} 
+                  disabled={order.delivery_status === 'delivered' || order.delivery_status === 'returned'}
+                  className={`py-4 rounded-2xl font-black uppercase text-[9px] tracking-widest transition-all flex flex-col items-center justify-center gap-2 ${order.delivery_status === 'returned' ? 'bg-red-600 text-white shadow-lg' : 'bg-gray-50 text-gray-400 hover:border-red-400 border border-transparent'}`}
+                >
+                  <XCircle size={18}/> Retour
+                </button>
               </div>
             </div>
-          ))}
-          {filteredOrders.length === 0 && <p className="text-center py-20 opacity-20 font-black text-xs uppercase">Aucune mission</p>}
+          )) : (
+            <div className="flex flex-col items-center justify-center py-20 opacity-20 text-center">
+               <Truck size={80} strokeWidth={1} className="animate-bounce"/>
+               <p className="font-black uppercase text-sm mt-4 tracking-widest">Aucune mission assignée</p>
+            </div>
+          )}
         </div>
 
-        <div className={`lg:col-span-8 flex flex-col gap-6 min-h-[300px] ${viewMode === 'list' ? 'hidden lg:flex' : 'flex'}`}>
-           <div className="flex-1 bg-white rounded-[40px] shadow-sm border-8 border-white overflow-hidden relative">
-              <div ref={mapContainerRef} className="absolute inset-0 z-0 h-full w-full"></div>
-              <button onClick={() => mapInstanceRef.current?.panTo([myLocation.lat, myLocation.lng])} className="absolute bottom-6 right-6 z-10 p-4 bg-white text-blue-600 rounded-2xl shadow-2xl border border-gray-100"><MapPin size={24} /></button>
-           </div>
-        </div>
+        {!isLivreur && (
+          <div className={`lg:col-span-8 ${viewMode === 'list' ? 'hidden' : 'flex'} flex-col gap-6 h-full relative`}>
+             <div className="flex-1 bg-white rounded-[40px] shadow-sm border-[8px] border-white overflow-hidden relative">
+                <div ref={mapContainerRef} className="absolute inset-0 z-0 h-full w-full"></div>
+                <div className="absolute top-4 left-4 z-10 bg-black/80 backdrop-blur-md p-6 rounded-[32px] text-white space-y-4 border border-white/10 max-w-[250px]">
+                   <p className="text-[9px] font-black uppercase tracking-[0.3em] opacity-50 flex items-center gap-2">
+                     <span className="w-1.5 h-1.5 bg-red-600 rounded-full animate-pulse"></span> Télémétrie Nexus
+                   </p>
+                   <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2">
+                      {drivers.map(d => {
+                        const isOnline = (new Date().getTime() - new Date(d.updated_at || 0).getTime()) < 60000;
+                        return (
+                          <div key={d.id} className="flex items-center gap-3">
+                             <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 shadow-[0_0_10px_#22c55e]' : 'bg-gray-500'}`}></div>
+                             <div className="flex-1">
+                               <p className="text-[11px] font-black uppercase truncate">{d.driver_name}</p>
+                               <p className="text-[8px] text-gray-400 font-bold uppercase">{isOnline ? 'Actif' : 'Pause'}</p>
+                             </div>
+                          </div>
+                        );
+                      })}
+                   </div>
+                </div>
+             </div>
+          </div>
+        )}
       </div>
     </div>
   );
