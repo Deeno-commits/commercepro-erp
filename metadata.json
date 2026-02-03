@@ -1,0 +1,8 @@
+{
+  "name": "CommercePro ERP",
+  "description": "Système complet de gestion commerciale ultra-professionnel (Stock, POS, GPS, Stats).",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ]
+}
