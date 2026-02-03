@@ -39,11 +39,33 @@ const DeliveryManagement: React.FC = () => {
   const myProfile = drivers.find(d => d.user_id === user?.id);
 
   const fetchData = async () => {
-    const { data: d } = await supabase.from('deliveries').select('*');
-    const { data: o } = await supabase.from('sales').select('*').neq('delivery_status', 'none').order('created_at', { ascending: false });
-    if (d) setDrivers(d);
-    if (o) setOrders(o);
-    setLoading(false);
+    try {
+      const { data: d } = await supabase.from('deliveries').select('*');
+      const { data: o } = await supabase.from('sales').select('*').neq('delivery_status', 'none').order('created_at', { ascending: false });
+      
+      if (d) setDrivers(d);
+      if (o) setOrders(o);
+
+      // Auto-création du profil livreur s'il n'existe pas
+      if (isLivreur && d && !d.find(p => p.user_id === user?.id)) {
+        const { data: newProfile, error } = await supabase.from('deliveries').insert([{
+          user_id: user?.id,
+          driver_name: user?.first_name || 'Livreur',
+          status: 'available',
+          work_status: 'rest',
+          current_lat: myLocation.lat,
+          current_lng: myLocation.lng
+        }]).select().single();
+        
+        if (!error && newProfile) {
+          setDrivers(prev => [...prev, newProfile]);
+        }
+      }
+    } catch (err) {
+      console.error("Fetch error", err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const updateOrderStatus = async (orderId: string, status: string) => {
@@ -55,20 +77,32 @@ const DeliveryManagement: React.FC = () => {
   };
 
   const toggleWorkStatus = async () => {
-    if (!myProfile) return;
+    // Si myProfile n'est pas encore là, on attend ou on force un rafraîchissement
+    if (!myProfile) {
+       await fetchData();
+       if (!myProfile) return;
+    }
+
     const newStatus = myProfile.work_status === 'active' ? 'rest' : 'active';
     try {
       const { error } = await supabase.from('deliveries').update({ work_status: newStatus }).eq('id', myProfile.id);
       if (error) throw error;
       fetchData();
-    } catch (err) { alert("Erreur status travail"); }
+    } catch (err) { 
+      console.error(err);
+      alert("Erreur status travail"); 
+    }
   };
 
   useEffect(() => {
     if (isLivreur) {
       setViewMode('list');
-      return;
     }
+    fetchData();
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (isLivreur) return;
     if (!mapContainerRef.current || mapInstanceRef.current || viewMode !== 'map') return;
     mapInstanceRef.current = L.map(mapContainerRef.current, { zoomControl: false, attributionControl: false }).setView([myLocation.lat, myLocation.lng], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapInstanceRef.current);
@@ -106,7 +140,6 @@ const DeliveryManagement: React.FC = () => {
   }, [drivers, isLivreur, viewMode]);
 
   useEffect(() => {
-    fetchData();
     let watchId: number;
     if (navigator.geolocation) {
       watchId = navigator.geolocation.watchPosition((pos) => {
@@ -128,6 +161,7 @@ const DeliveryManagement: React.FC = () => {
     return () => { if (watchId) navigator.geolocation.clearWatch(watchId); };
   }, [isLivreur, myProfile?.id]);
 
+  // Filtrage intelligent : pour un livreur, on montre uniquement ce qui lui est assigné
   const filteredOrders = orders.filter(o => !isLivreur || o.assigned_driver_id === myProfile?.id);
 
   if (loading) return (
@@ -155,7 +189,6 @@ const DeliveryManagement: React.FC = () => {
         <div className="flex items-center gap-3">
           {isLivreur ? (
             <>
-              {/* BOUTON ACTIF / REST */}
               <button 
                 onClick={toggleWorkStatus}
                 className={`flex items-center gap-3 px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all shadow-xl ${myProfile?.work_status === 'active' ? 'bg-orange-100 text-orange-600' : 'bg-green-600 text-white'}`}
@@ -195,25 +228,22 @@ const DeliveryManagement: React.FC = () => {
                 </div>
               </div>
               
-              {/* BOUTONS EN ROUTE / LIVRÉ / RETOUR */}
               <div className="grid grid-cols-3 gap-3">
                 <button 
                   onClick={() => updateOrderStatus(order.id, 'en_route')} 
-                  disabled={order.delivery_status !== 'pending' && order.delivery_status !== 'assigned'}
+                  disabled={order.delivery_status === 'delivered'}
                   className={`py-4 rounded-2xl font-black uppercase text-[9px] tracking-widest transition-all flex flex-col items-center justify-center gap-2 ${order.delivery_status === 'en_route' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-50 text-gray-400 hover:border-blue-400 border border-transparent'}`}
                 >
                   <Navigation size={18}/> En Route
                 </button>
                 <button 
                   onClick={() => updateOrderStatus(order.id, 'delivered')} 
-                  disabled={order.delivery_status === 'delivered' || order.delivery_status === 'returned'}
                   className={`py-4 rounded-2xl font-black uppercase text-[9px] tracking-widest transition-all flex flex-col items-center justify-center gap-2 ${order.delivery_status === 'delivered' ? 'bg-green-600 text-white shadow-lg' : 'bg-gray-50 text-gray-400 hover:border-green-400 border border-transparent'}`}
                 >
                   <CheckCircle size={18}/> Livré
                 </button>
                 <button 
                   onClick={() => updateOrderStatus(order.id, 'returned')} 
-                  disabled={order.delivery_status === 'delivered' || order.delivery_status === 'returned'}
                   className={`py-4 rounded-2xl font-black uppercase text-[9px] tracking-widest transition-all flex flex-col items-center justify-center gap-2 ${order.delivery_status === 'returned' ? 'bg-red-600 text-white shadow-lg' : 'bg-gray-50 text-gray-400 hover:border-red-400 border border-transparent'}`}
                 >
                   <XCircle size={18}/> Retour
