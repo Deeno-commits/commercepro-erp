@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
-  base: './', // Important pour Electron
+  base: './', // CRITIQUE pour Electron : utilise des chemins relatifs
   server: {
     port: 5173,
     strictPort: true,
@@ -12,6 +12,7 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    emptyOutDir: true
+    emptyOutDir: true,
+    assetsDir: 'assets'
   }
 });

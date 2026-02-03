@@ -3,6 +3,8 @@
   "name": "commercepro-erp",
   "private": true,
   "version": "1.0.0",
+  "description": "Système de gestion commerciale ultra-professionnel",
+  "author": "Deenasti",
   "type": "module",
   "main": "main.js",
   "scripts": {
@@ -56,7 +58,8 @@
       "package.json"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "public/favicon.ico"
     },
     "nsis": {
       "oneClick": false,
